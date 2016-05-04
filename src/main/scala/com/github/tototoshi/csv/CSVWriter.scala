@@ -21,6 +21,7 @@ import java.io._
 class CSVWriter(protected val writer: Writer)(implicit val format: CSVFormat) extends Closeable with Flushable {
 
   private val printWriter: PrintWriter = new PrintWriter(writer)
+  private val quoteMinimalSpecs = List("\r", "\n", format.quoteChar.toString, format.delimiter.toString)
 
   def close(): Unit = printWriter.close()
 
@@ -31,27 +32,26 @@ class CSVWriter(protected val writer: Writer)(implicit val format: CSVFormat) ex
     def shouldQuote(field: String, quoting: Quoting): Boolean =
       quoting match {
         case QUOTE_ALL => true
-        case QUOTE_MINIMAL => {
-          List("\r", "\n", format.quoteChar.toString, format.delimiter.toString).exists(field.contains)
-        }
+        case QUOTE_MINIMAL => quoteMinimalSpecs.exists(field.contains)
         case QUOTE_NONE => false
-        case QUOTE_NONNUMERIC => {
+        case QUOTE_NONNUMERIC =>
           if (field.forall(_.isDigit)) {
             false
           } else {
-            val firstCharIsDigit = field.headOption.map(_.isDigit).getOrElse(false)
+            val firstCharIsDigit = field.headOption.exists(_.isDigit)
             if (firstCharIsDigit && (field.filterNot(_.isDigit) == ".")) {
               false
             } else {
               true
             }
           }
-        }
       }
 
     def quote(field: String): String =
-      if (shouldQuote(field, format.quoting)) field.mkString(format.quoteChar.toString, "", format.quoteChar.toString)
-      else field
+      if (shouldQuote(field, format.quoting))
+        format.quoteChar + field + format.quoteChar.toString
+      else
+        field
 
     def repeatQuoteChar(field: String): String =
       field.replace(format.quoteChar.toString, format.quoteChar.toString * 2)
@@ -69,7 +69,16 @@ class CSVWriter(protected val writer: Writer)(implicit val format: CSVFormat) ex
       quote _ compose escape compose show
     }
 
-    printWriter.print(fields.map(renderField).mkString(format.delimiter.toString))
+    val iterator = fields.iterator
+    var hasNext = iterator.hasNext
+    while (hasNext) {
+      printWriter.print(renderField(iterator.next()))
+      hasNext = iterator.hasNext
+      if (hasNext) {
+        printWriter.print(format.delimiter)
+      }
+    }
+
     printWriter.print(format.lineTerminator)
   }
 
